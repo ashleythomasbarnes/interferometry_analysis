@@ -1,6 +1,7 @@
+### Note that as for Nov. 2019 this code is completely untested and may not function with the newest version of casa
+### Use at own risk! 
+
 execfile('masking_function.py')
-
-
 
 def run_cubeclean(vis, imagename, imsize, cell,
                 phasecenter='', restfreq='',
