@@ -1,122 +1,159 @@
 execfile('masking_function.py')
 
-def run_clean(cycle_list, vis, imagename, imsize, cell, phasecenter, niter_list, tc_list, restfreq, threshold_list, rms_list, fl_list, useimage_
-list, pixelmin_list, major, minor, pixelsize, overwrite_old = False,
-              datacolumn = 'data', field = '', stokes = 'I', projection = 'SIN', specmode = 'cube', nchan = -1, width = 1, start = 0, outframe =
- 'LSRK',
-              veltype = 'radio', interpolation = 'linear', gridder = 'mosaic', pblimit = 0.2, normtype = 'flatnoise', deconvolver = 'multiscale'
-, scales = [0, 7, 21, 63], restoringbeam  = [], outlierfile = '', weighting = 'natural',
-              uvtaper = [], gain = 0.1, cycleniter = -1, cyclefactor = 1.0, minpsffraction = 0.05, maxpsffraction = 0.8, interactive = False, sa
-vemodel = 'none', calcres = True, calcpsf = True, parallel = False):
+
+
+def run_cubeclean(vis, imagename, imsize, cell,
+                phasecenter='', restfreq='',
+                nchan=-1, width=1, start=0,
+                datacolumn='data', parallel=False,
+                mk_dirty=True, n_cycles=5):
+
+    ''' Code to conduct basic *cube* cleaning of ALMA data in CASA
+        Input:
+            [Required]
+            vis = Input .ms file
+            imagename = Output full path imagename, without extension (e.g. without .image)
+            imsize = Size of image in pixels
+            cell = Size of cell in arcsec
+            [optional]
+            phasecenter = Phasecenter for imaging; default is nothing, but not sure if will run without
+            restfreq = frequency of line to be imaged, default is nothing, but not sure if will run without
+            nchan = number of channels to be imaged: default is all,
+            width = width of channels to be imaged: default is 1 channel,
+            start = start of channels to be imaged: default is channle 0,
+            datacolumn = column in .ms to be imaged; default is 'data' column,
+            parallel = conduct clean in parallel; default is False,
+            mk_dirty = make the dirty image as first step; default is True,
+        Return
+            None
+                    '''
+
+    #multiscale scales
+    scales = [0, 7, 21, 63]
 
     #Makes dirty image
-    if 0 in cycle_list:
-        print 'Making dirty'
-        cycle = 0; mask = ''; startmodel = ''
-        tclean(vis       = vis,
-               datacolumn     = datacolumn,
-               imagename      = imagename+'.'+tc_list[cycle],
+    if mk_dirty:
+
+        dirtyimage = '%s_dirty' %imagename
+        print '[INFO] Making dirty image: %s' %outimage
+
+        tclean(vis            = vis,
+               datacolumn     = 'data',
+               imagename      = dirtyimage,
                imsize         = imsize,
                cell           = cell,
                phasecenter    = phasecenter,
-               stokes         = stokes,
-               field          = field,
-               projection     = projection,
-               startmodel     = startmodel,
-               specmode       = specmode,
+               specmode       = 'cube',
                nchan          = nchan,
                start          = start,
                width          = width,
-               outframe       = outframe,
-               veltype        = veltype,
+               outframe       = 'LSRK',
                restfreq       = restfreq,
-               interpolation  = interpolation,
-               gridder        = gridder,
-               pblimit        = pblimit,
-               normtype       = normtype,
-               deconvolver    = deconvolver,
+               gridder        = 'mosaic',
+               deconvolver    = 'multiscale',
                scales         = scales,
-               restoringbeam  = restoringbeam,
-               outlierfile    = outlierfile,
-               weighting      = weighting,
-               uvtaper        = uvtaper,
-               niter          = niter_list[cycle],
-               gain           = gain,
-               threshold      = threshold_list[cycle],
-               cycleniter     = cycleniter,
-               cyclefactor    = cyclefactor,
-               minpsffraction = minpsffraction,
-               maxpsffraction = maxpsffraction,
-               interactive    = interactive,
-               mask           = mask,
-               savemodel      = savemodel,
-               calcres        = calcres,
-               calcpsf        = calcpsf,
+               niter          = 0,
+               interactive    = False,
                parallel       = parallel)
 
     #Cleaning up the dir
+    print '[INFO] Cleaning output dir.'
+    os.system('rm -rf %s.weight' %dirtyimage)
+    os.system('rm -rf %s.model' %dirtyimage)
+    os.system('rm -rf %s.psf' %dirtyimage)
+    os.system('rm -rf %s.sumwt' %dirtyimage)
 
-    os.system('rm -rf '+imagename+'.'+tc_list[cycle]+'.weight')
-    os.system('rm -rf '+imagename+'.'+tc_list[cycle]+'.model')
-    os.system('rm -rf '+imagename+'.'+tc_list[cycle]+'.psf')
-    os.system('rm -rf '+imagename+'.'+tc_list[cycle]+'.sumwt')
+    # define thresholds, from 10 to 1
+    threshs = np.linspace(10, 1, 5)
 
     #Makes mask and cleans
-    for cycle in cycle_list:
+    for cycle in range(n_cycles):
+
+        previmage = '%s_cycle%i' %(imagename, cycle-1)
+        outimage = '%s_cycle%i' %(imagename, cycle)
+        print '[INFO] Cleaning cycle %i' %cycle
+        print '[INFO] Making image: %s' %outimage
+
+        header = imhead(imagename=dirtyimage)
+        major = header['restoringbeam']['major']['value']
+        minor = header['restoringbeam']['minor']['value']
+        beam_area = major*minor
+        pixel_area = cell**2
+        beam_pixel_ratio = beam_area/pixel_area
+
+        thresh = threshs[cycle]
+        print '[INFO] Cycle thresh: %0.2f rms' %thresh
+
         if cycle == 0:
-            continue
 
-        mask = make_mask_3d(imagename+'.'+tc_list[cycle-1], rms_list[cycle], fl = fl_list[cycle], useimage = useimage_list[cycle], pixelmin = pi
-xelmin_list[cycle], major = major, minor = minor, pixelsize = pixelsize, line = True, overwrite_old = overwrite_old)
-        startmodel = ''
-        if startmodel_list[cycle]:
-            startmodel = dir_line+'.'+tc_list[cycle-1]+'.model'
+            dirtyimage = '%s.image' %dirtyimage
+            stats = imstat(imagename = dirtyimage_)
+            mad = stat['medabsdevmed']
+            print '[INFO] Cycle rms: %g Jy/beam' %mad
 
-        tclean(vis       = vis,
-               datacolumn     = datacolumn,
-               imagename      = imagename+'.'+tc_list[cycle],
+            mask = make_mask_3d(imagename = dirtyimage,
+                                thresh = thresh,
+                                fl = False,
+                                useimage = True,
+                                pixelmin = beam_pixel_ratio*3,
+                                major = major,
+                                minor = minor,
+                                pixelsize = cell,
+                                line = True,
+                                overwrite_old = False)
+
+            startmodel =  ''
+            print '[INFO] No model - okay?'
+
+        else:
+
+            previmage_ = '%s.image' %previmage
+            stats = imstat(imagename=previmage_)
+            mad = stat['medabsdevmed']
+            print '[INFO] Cycle rms: %g Jy/beam' %mad
+
+            mask = make_mask_3d(imagename = previmage,
+                                thresh = thresh,
+                                fl = True,
+                                useimage = False,
+                                pixelmin = beam_pixel_ratio*3,
+                                major = major,
+                                minor = minor,
+                                pixelsize = cell,
+                                line = True,
+                                overwrite_old = False)
+
+            startmodel = '%s.model' %previmage
+            print '[INFO] Using model: %s' %startmodel
+
+        tclean(vis            = vis,
+               datacolumn     = 'data',
+               imagename      = outimage,
                imsize         = imsize,
                cell           = cell,
                phasecenter    = phasecenter,
-               stokes         = stokes,
-               field          = field,
-               projection     = projection,
-               startmodel     = startmodel,
-               specmode       = specmode,
+               specmode       = 'cube',
                nchan          = nchan,
                start          = start,
                width          = width,
-               outframe       = outframe,
-               veltype        = veltype,
+               outframe       = 'LSRK',
                restfreq       = restfreq,
-               interpolation  = interpolation,
-               gridder        = gridder,
-               pblimit        = pblimit,
-               normtype       = normtype,
-               deconvolver    = deconvolver,
+               gridder        = 'mosaic',
+               deconvolver    = 'multiscale',
                scales         = scales,
-               restoringbeam  = restoringbeam,
-               outlierfile    = outlierfile,
-               weighting      = weighting,
-               uvtaper        = uvtaper,
-               niter          = niter_list[cycle],
-               gain           = gain,
-               threshold      = threshold_list[cycle],
-               cycleniter     = cycleniter,
-               cyclefactor    = cyclefactor,
-               minpsffraction = minpsffraction,
-               maxpsffraction = maxpsffraction,
-               interactive    = interactive,
+               niter          = 1000000,
+               threshold      = thresh*mad,
+               interactive    = False,
                mask           = mask,
-               savemodel      = savemodel,
-               calcres        = calcres,
-               calcpsf        = calcpsf,
+               startmodel     = startmodel,
                parallel       = parallel)
 
-        os.system('rm -rf '+imagename+'.'+tc_list[cycle]+'.weight')
-        os.system('rm -rf '+imagename+'.'+tc_list[cycle]+'.model')
-        os.system('rm -rf '+imagename+'.'+tc_list[cycle]+'.psf')
-        os.system('rm -rf '+imagename+'.'+tc_list[cycle]+'.sumwt')
-        os.system('rm -rf '+imagename+'.'+tc_list[cycle-1]+'.threshmask')
-        os.system('rm -rf '+imagename+'.'+tc_list[cycle-1]+'.fullmask')
-        os.system('rm -rf '+imagename+'.'+tc_list[cycle-1]+'.fullmask.nopb')
+        os.system('rm -rf %s.weight' %outimage)
+        os.system('rm -rf %s.model' %outimage)
+        os.system('rm -rf %s.psf' %outimage)
+        os.system('rm -rf %s.sumwt' %outimage)
+        os.system('rm -rf %s.threshmask' %previmage)
+        os.system('rm -rf %s.fullmask' %previmage)
+        os.system('rm -rf %s.fullmask.nopb' %previmage)
+
+        return
